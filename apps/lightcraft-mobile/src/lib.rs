@@ -744,6 +744,10 @@ pub fn run(mut options: eframe::NativeOptions, library_dir: std::path::PathBuf, 
                     let font = egui::FontData { index, ..egui::FontData::from_static(bytes) };
                     lightcraft_ui_egui::theme::add_fallback_font("system CJK", font);
                 }
+                // and the other scripts no bundled font has (Georgian's name in the Language list …)
+                for (script, bytes) in android_jni::system_script_fonts() {
+                    lightcraft_ui_egui::theme::add_script_fallback_font(&format!("system {script}"), bytes, 0, script);
+                }
             }
             // the system's fonts: SF for the interface, and every script the phone can show
             #[cfg(target_os = "ios")]

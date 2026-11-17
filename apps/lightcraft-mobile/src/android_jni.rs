@@ -409,7 +409,38 @@ pub fn ime_event(edit: &str) -> Option<egui::ImeEvent> {
 /// clean file pages the system can drop and reload, not app memory. `index` picks the region's
 /// face (0 Japanese, 1 Korean, 2 Simplified Chinese, 3 Traditional Chinese).
 pub fn system_cjk_font() -> Option<(&'static [u8], u32)> {
-    let path = c"/system/fonts/NotoSansCJK-Regular.ttc";
+    Some((map_system_font(c"/system/fonts/NotoSansCJK-Regular.ttc")?, cjk_face(&system_locale())))
+}
+
+/// The system's fonts for the scripts the bundled fonts lack (a language's own name in the
+/// Language list, a keyword or file name typed in it), by script: the first file of each that the
+/// system has. Android ships Noto for every script; the file names changed over the years
+/// (static faces, then variable ones).
+const SCRIPT_FONTS: &[(&str, &[&std::ffi::CStr])] = &[
+    ("Geor", &[c"/system/fonts/NotoSansGeorgian-VF.ttf", c"/system/fonts/NotoSansGeorgian-Regular.ttf"]),
+    ("Armn", &[c"/system/fonts/NotoSansArmenian-VF.ttf", c"/system/fonts/NotoSansArmenian-Regular.ttf"]),
+    ("Hebr", &[c"/system/fonts/NotoSansHebrew-Regular.ttf"]),
+    ("Arab", &[c"/system/fonts/NotoNaskhArabicUI-Regular.ttf", c"/system/fonts/NotoNaskhArabic-Regular.ttf"]),
+    ("Thai", &[c"/system/fonts/NotoSansThaiUI-Regular.ttf", c"/system/fonts/NotoSansThai-Regular.ttf"]),
+    (
+        "Deva",
+        &[
+            c"/system/fonts/NotoSansDevanagariUI-VF.ttf",
+            c"/system/fonts/NotoSansDevanagariUI-Regular.ttf",
+            c"/system/fonts/NotoSansDevanagari-Regular.ttf",
+        ],
+    ),
+    ("Ethi", &[c"/system/fonts/NotoSansEthiopic-VF.ttf", c"/system/fonts/NotoSansEthiopic-Regular.ttf"]),
+];
+
+/// [`SCRIPT_FONTS`] the system has, mapped read-only, with their script.
+pub fn system_script_fonts() -> Vec<(&'static str, &'static [u8])> {
+    let found = |paths: &[&std::ffi::CStr]| paths.iter().find_map(|p| map_system_font(p));
+    SCRIPT_FONTS.iter().filter_map(|(script, paths)| Some((*script, found(paths)?))).collect()
+}
+
+/// A font file of the system's, mapped read-only for the process's life.
+fn map_system_font(path: &std::ffi::CStr) -> Option<&'static [u8]> {
     // SAFETY: plain libc calls on a NUL-terminated path; the mapping is checked, kept for the
     // process's life (the slice is 'static) and never written: the file is on the read-only
     // system partition, so it can't change under the mapping
@@ -425,7 +456,7 @@ pub fn system_cjk_font() -> Option<(&'static [u8], u32)> {
         if p == libc::MAP_FAILED {
             return None;
         }
-        Some((std::slice::from_raw_parts(p.cast::<u8>(), len), cjk_face(&system_locale())))
+        Some(std::slice::from_raw_parts(p.cast::<u8>(), len))
     }
 }
 
