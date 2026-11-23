@@ -624,15 +624,27 @@ fn hold_photo_id() -> egui::Id {
     egui::Id::unique("compact-hold-photo-original")
 }
 
+/// The press whose hold ended while it was still down.
+fn spent_key() -> egui::Id {
+    egui::Id::unique("compact-hold-photo-spent")
+}
+
 /// A finger is holding the photo as shot ([`hold_original_on_photo`]): its lift is the end of the
 /// hold, not a tap.
 pub(crate) fn holding_original(ctx: &egui::Context) -> bool {
     ctx.data(|d| d.get_temp::<crate::state::BeforeAfter>(hold_photo_id())).is_some()
 }
 
-/// One finger resting on the photo in the editor: the photo as shot until it lifts (the view it
-/// replaced comes back then), as the Show Original button does. Followed from the pointer, not
-/// egui's long press: a still finger sends no events, so the frame that shows it is asked for here.
+/// Panels whose tool draws on the photo (crop handles, brush, heal, red eye): a finger resting
+/// there is the pause before a drag, never a hold for the original.
+fn tool_on_photo(right: RightPanel) -> bool {
+    matches!(right, RightPanel::Crop | RightPanel::Masking | RightPanel::Remove | RightPanel::RedEye)
+}
+
+/// One finger resting on the photo in the editor: the photo as shot until it lifts or moves on
+/// (the view it replaced comes back then), as the Show Original button does. Followed from the
+/// pointer, not egui's long press: a still finger sends no events, so the frame that shows it is
+/// asked for here.
 pub(crate) fn hold_original_on_photo(app: &mut LightcraftApp, resp: &egui::Response) {
     let ctx = &resp.ctx;
     let key = hold_photo_id();
@@ -647,15 +659,27 @@ pub(crate) fn hold_original_on_photo(app: &mut LightcraftApp, resp: &egui::Respo
             i.time,
         )
     });
+    let near = |origin: egui::Pos2| pos.is_none_or(|p| p.distance(origin) <= HOLD_SLOP);
     if let Some(before) = ctx.data(|d| d.get_temp::<crate::state::BeforeAfter>(key)) {
-        if !down && !touches {
-            ctx.data_mut(|d| d.remove::<crate::state::BeforeAfter>(key));
+        // a lift ends the hold, and so does a finger that moves on (a drag or a second finger)
+        if !down && !touches || pinch || origin.is_some_and(|o| !near(o)) {
+            ctx.data_mut(|d| {
+                d.remove::<crate::state::BeforeAfter>(key);
+                // (that press doesn't hold again if it drifts back)
+                d.insert_temp(spent_key(), start);
+            });
             app.ui.before_after = before;
         }
         return;
     }
+    if tool_on_photo(app.ui.right) {
+        return;
+    }
     let (Some(start), Some(origin)) = (start, origin) else { return };
-    let resting = down && touches && !pinch && resp.rect.contains(origin) && pos.is_none_or(|p| p.distance(origin) <= HOLD_SLOP);
+    if ctx.data(|d| d.get_temp::<Option<f64>>(spent_key())) == Some(Some(start)) {
+        return;
+    }
+    let resting = down && touches && !pinch && resp.rect.contains(origin) && near(origin);
     if !resting {
         return;
     }

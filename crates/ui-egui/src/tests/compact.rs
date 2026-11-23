@@ -2470,6 +2470,43 @@ fn phone_long_press_on_the_photo_shows_the_original_not_a_menu() {
 }
 
 #[test]
+fn phone_hold_on_the_photo_leaves_tools_and_drags_alone() {
+    use crate::state::BeforeAfter;
+    // a tool that draws on the photo: a pause before dragging a crop corner or a brush stroke
+    // isn't a hold for the original
+    for right in ["crop", "masking", "remove", "redEye"] {
+        let mut h = demo(PHONE, json!({"view": "detail", "right": right}));
+        touch_screen(&mut h);
+        let at = h.app.canvas_rect.expect("the photo's room").center();
+        hold(&mut h, at, 60, |h| assert_eq!(h.app.ui.before_after, BeforeAfter::Off, "{right}: the edit stays under the tool"));
+    }
+    // a hold that moves on (a drag) ends there, and doesn't come back if the finger drifts back
+    let mut h = demo(PHONE, json!({"view": "detail", "right": "edit"}));
+    touch_screen(&mut h);
+    let at = h.app.canvas_rect.expect("the photo's room").center();
+    let moved = |h: &mut Headless, to: egui::Pos2| {
+        h.input([finger(1, egui::TouchPhase::Move, to), egui::Event::PointerMoved(to)]);
+        h.step();
+    };
+    hold(&mut h, at, 60, |h| assert_eq!(h.app.ui.before_after, BeforeAfter::Original, "held still: the original"));
+    let button = |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() };
+    h.input([finger(1, egui::TouchPhase::Start, at), egui::Event::PointerMoved(at), button(at, true)]);
+    for _ in 0..60 {
+        h.step();
+    }
+    assert_eq!(h.app.ui.before_after, BeforeAfter::Original);
+    moved(&mut h, at + egui::vec2(0.0, 40.0));
+    assert_eq!(h.app.ui.before_after, BeforeAfter::Off, "a finger that moves on ends the hold");
+    moved(&mut h, at);
+    for _ in 0..30 {
+        h.step();
+    }
+    assert_eq!(h.app.ui.before_after, BeforeAfter::Off, "that press doesn't hold again");
+    h.input([finger(1, egui::TouchPhase::End, at), button(at, false), egui::Event::PointerGone]);
+    h.step();
+}
+
+#[test]
 fn phone_rename_is_a_name_field_for_one_photo_and_formats_for_more() {
     use crate::state::Dialog;
     let mut h = editor_phone_for_shots();
