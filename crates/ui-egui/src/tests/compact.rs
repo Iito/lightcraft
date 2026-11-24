@@ -1782,6 +1782,9 @@ fn phone_held_sideways_a_swipe_along_the_photo_steps_through_them() {
     for turn in [1i8, -1] {
         h.app.device_turn = turn;
         settle(&mut h);
+        // (renders land on worker threads' time: a frame may come while the photo's texture is
+        // being swapped, so wait for the turned photo rather than count frames)
+        assert!(h.step_until(SETTLE, |h| widget(h, "photo:sideways").is_some()), "turn {turn}: sideways");
         let c = widget(&h, "photo:sideways").expect("sideways").center();
         // to the next photo: the way the photo's right edge faces, towards its left
         let towards_next = egui::vec2(0.0, -200.0 * f32::from(turn));
@@ -1792,6 +1795,7 @@ fn phone_held_sideways_a_swipe_along_the_photo_steps_through_them() {
         touch_drag(&mut h, c, c - towards_next, 10);
         settle(&mut h);
         assert_eq!(h.app.session.active(), first, "turn {turn}: back");
+        assert!(h.step_until(SETTLE, |h| widget(h, "photo:sideways").is_some()), "turn {turn}: back sideways");
         assert_eq!(widget(&h, "photo:sideways").expect("sideways").center(), c, "home");
     }
 }
