@@ -202,7 +202,11 @@ public class LightCraftActivity extends NativeActivity {
         });
     }
 
-    /** How the last saves to the gallery went ("N" photos saved, or "!why"), taken by {@link #takeSaved}. */
+    /**
+     * How the last saves to the gallery went, taken by {@link #takeSaved}: "N" photos saved, or
+     * "!N/TOTAL why" when some failed (N of them saved all the same, so a retry knows what is
+     * already there; why: the first failure).
+     */
     private final ArrayList<String> saved = new ArrayList<>();
 
     /**
@@ -216,20 +220,22 @@ public class LightCraftActivity extends NativeActivity {
             public void run() {
                 String result;
                 if (Build.VERSION.SDK_INT < 29) {
-                    result = "!Saving to the gallery needs Android 10 or later: use Share instead";
+                    result = "!0/0 Saving to the gallery needs Android 10 or later: use Share instead";
                 } else {
                     int n = 0;
+                    int total = 0;
                     String error = null;
                     for (String path : joined.split("\n")) {
                         if (path.isEmpty() || path.endsWith(".xmp")) continue;
+                        total++;
                         try {
                             addToGallery(new File(path));
                             n++;
                         } catch (Exception e) {
-                            error = e.getMessage();
+                            if (error == null) error = String.valueOf(e.getMessage());
                         }
                     }
-                    result = error == null ? Integer.toString(n) : "!" + error;
+                    result = error == null ? Integer.toString(n) : "!" + n + "/" + total + " " + error;
                 }
                 synchronized (saved) {
                     saved.add(result);

@@ -244,6 +244,37 @@ pub fn poll_photos(app: &mut LightcraftApp, ctx: &egui::Context) {
 #[cfg(target_arch = "wasm32")]
 pub fn poll_photos(_: &mut LightcraftApp, _: &egui::Context) {}
 
+/// A save to the photo library that failed, after `saved` of `total` photos went in (Android
+/// saves one at a time; iOS saves a batch whole or not at all: 0 of 0).
+#[derive(Debug, PartialEq)]
+pub struct SaveFailed {
+    pub saved: usize,
+    pub total: usize,
+    pub why: String,
+}
+
+/// One line of the Android activity's `takeSaved`: "N" photos saved, or "!N/TOTAL why".
+pub fn parse_saved(line: &str) -> Result<usize, SaveFailed> {
+    let Some(failed) = line.strip_prefix('!') else { return Ok(line.parse().unwrap_or(0)) };
+    let (counts, why) = failed.split_once(' ').unwrap_or((failed, ""));
+    let (saved, total) = counts.split_once('/').unwrap_or(("0", "0"));
+    Err(SaveFailed { saved: saved.parse().unwrap_or(0), total: total.parse().unwrap_or(0), why: why.to_string() })
+}
+
+/// What a save to the photo library says: the count, or the failure with what was saved before
+/// it, so a retry doesn't add the same photos again.
+pub fn saved_message(r: Result<usize, SaveFailed>) -> String {
+    use crate::i18n::tr;
+    match r {
+        Ok(1) => tr("Saved to Photos").to_string(),
+        Ok(n) => format!("{} {n}", tr("Photos saved:")),
+        Err(SaveFailed { saved: 0, why, .. }) => format!("{} {why}", tr("Couldn't save to Photos:")),
+        Err(SaveFailed { saved, total, why }) => {
+            crate::i18n::tr_format!("{saved} of {total} saved to Photos; the rest failed: {why}", saved = saved, total = total, why = why)
+        }
+    }
+}
+
 /// What a finished export says: how many files were written, skipped or failed, and the Apple Photos note.
 fn export_summary(files: &[Value], photos: Option<&Value>, total: usize, cancelled: bool) -> String {
     let sheet = files.first().filter(|f| f["contactSheet"] == true);
@@ -435,6 +466,18 @@ mod contact_sheet_tests {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_partly_failed_save_says_what_was_saved() {
+        use super::{SaveFailed, parse_saved, saved_message};
+        assert_eq!(parse_saved("3"), Ok(3));
+        let partly = parse_saved("!6/10 No space left on device");
+        assert_eq!(partly, Err(SaveFailed { saved: 6, total: 10, why: "No space left on device".into() }));
+        assert_eq!(saved_message(partly), "6 of 10 saved to Photos; the rest failed: No space left on device");
+        let none = parse_saved("!0/0 Saving to the gallery needs Android 10 or later: use Share instead");
+        assert_eq!(saved_message(none), "Couldn't save to Photos: Saving to the gallery needs Android 10 or later: use Share instead");
+        assert_eq!(saved_message(Ok(1)), "Saved to Photos");
+    }
+
     use super::*;
 
     /// The toast's Apple Photos part (issue #236): the count and album, a partial import's

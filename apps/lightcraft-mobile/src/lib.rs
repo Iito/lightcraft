@@ -135,18 +135,18 @@ impl App {
     /// (what was copied is imported).
     /// Report the Share sheet's saves to the photo library once the system has answered.
     fn photos_saved(&mut self, ctx: &egui::Context) {
+        // (PhotoKit saves a batch whole or not at all)
         #[cfg(target_os = "ios")]
-        let done = ios_photos::take_results();
+        let done: Vec<Result<usize, lightcraft_ui_egui::export_task::SaveFailed>> = ios_photos::take_results()
+            .into_iter()
+            .map(|r| r.map_err(|why| lightcraft_ui_egui::export_task::SaveFailed { saved: 0, total: 0, why }))
+            .collect();
         #[cfg(target_os = "android")]
         let done = ANDROID_APP.get().map(android_jni::take_saved).unwrap_or_default();
         #[cfg(not(any(target_os = "ios", target_os = "android")))]
-        let done: Vec<Result<usize, String>> = Vec::new();
+        let done: Vec<Result<usize, lightcraft_ui_egui::export_task::SaveFailed>> = Vec::new();
         for r in done {
-            let msg = match r {
-                Ok(1) => lightcraft_ui_egui::i18n::tr("Saved to Photos").to_string(),
-                Ok(n) => format!("{} {n}", lightcraft_ui_egui::i18n::tr("Photos saved:")),
-                Err(why) => format!("{} {why}", lightcraft_ui_egui::i18n::tr("Couldn't save to Photos:")),
-            };
+            let msg = lightcraft_ui_egui::export_task::saved_message(r);
             log::info!("{msg}");
             self.app.toast(ctx, msg);
         }

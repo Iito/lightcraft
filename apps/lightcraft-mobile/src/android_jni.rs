@@ -152,8 +152,9 @@ pub fn save_to_gallery(app: &AndroidApp, paths: &[String]) {
     }
 }
 
-/// Saves to the gallery finished since the last call: how many photos, or why it failed.
-pub fn take_saved(app: &AndroidApp) -> Vec<Result<usize, String>> {
+/// Saves to the gallery finished since the last call: how many photos, or how many of how many
+/// were saved before the rest failed, and why.
+pub fn take_saved(app: &AndroidApp) -> Vec<Result<usize, lightcraft_ui_egui::export_task::SaveFailed>> {
     let r = with_activity(app, |env, activity| {
         let s = env.call_method(activity, jni_str!("takeSaved"), jni_sig!("()Ljava/lang/String;"), &[])?.l()?;
         if s.is_null() {
@@ -166,10 +167,7 @@ pub fn take_saved(app: &AndroidApp) -> Vec<Result<usize, String>> {
         log::warn!("save to gallery: {e}");
         String::new()
     });
-    text.lines()
-        .filter(|l| !l.is_empty())
-        .map(|l| l.strip_prefix('!').map_or_else(|| Ok(l.parse().unwrap_or(0)), |why| Err(why.to_string())))
-        .collect()
+    text.lines().filter(|l| !l.is_empty()).map(lightcraft_ui_egui::export_task::parse_saved).collect()
 }
 
 /// How far the copy of picked files is, while one runs: files copied, files to copy (0: not known
