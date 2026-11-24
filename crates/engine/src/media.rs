@@ -44,6 +44,10 @@ pub use source::{
     RENDER_CACHE_VERSION, ReducedLoader, SourceLevel, SourceRef, THUMB_SIZES, Twin, face_edge, thumb_bucket,
 };
 
+/// Peak memory of a full-resolution render per pixel, measured on a 48 MP JPEG (2.87 GB): a host
+/// that caps [`MediaCache::max_working_pixels`] gives such a render this much a pixel.
+pub const WORKING_BYTES_PER_PIXEL: usize = 60;
+
 pub struct MediaCache {
     settings_hashes: SettingsHashes,
     /// Decoded thumbnail-level sources (LRU by bytes).

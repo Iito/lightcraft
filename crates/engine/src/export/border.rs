@@ -23,11 +23,16 @@ pub struct Border {
     pub thickness: f32,
     /// The canvas's width : height (`None`: the same border on every side).
     pub ratio: Option<[u16; 2]>,
+    /// The photo with its border keeps the photo's own pixel count: the photo is exported smaller
+    /// to make room ([`Border::photo_size`]), so the file takes about the space the photo alone
+    /// would. Off: the border adds to the photo, up to what the device can hold
+    /// ([`border_too_big`]).
+    pub keep_size: bool,
 }
 
 impl Default for Border {
     fn default() -> Self {
-        Self { color: [255, 255, 255], thickness: 0.05, ratio: None }
+        Self { color: [255, 255, 255], thickness: 0.05, ratio: None, keep_size: false }
     }
 }
 
@@ -38,6 +43,18 @@ impl Border {
         let [w, h] = self.ratio?;
         let r = f32::from(w) / f32::from(h.max(1));
         (w > 0 && h > 0 && (1.0 / BORDER_MAX_RATIO..=BORDER_MAX_RATIO).contains(&r)).then_some(r)
+    }
+
+    /// The size a `w × h` photo is exported at under this border: smaller with
+    /// [`Border::keep_size`], so that the canvas round it has about `w × h` pixels (the border's
+    /// sizes follow the photo's, so the whole scales as one); else `w × h`.
+    pub fn photo_size(&self, w: usize, h: usize) -> (usize, usize) {
+        if !self.keep_size || w == 0 || h == 0 {
+            return (w, h);
+        }
+        let (cw, ch, _, _) = self.layout(w, h);
+        let k = ((w as f64 * h as f64) / (cw as f64 * ch as f64)).sqrt().min(1.0);
+        (((w as f64 * k).round() as usize).max(1), ((h as f64 * k).round() as usize).max(1))
     }
 
     /// For a `w × h` photo: the canvas's size and where the photo's top-left corner goes on it.
@@ -59,6 +76,23 @@ impl Border {
         }
         (cw, ch, (cw - w) / 2, (ch - h) / 2)
     }
+}
+
+/// Why border `b` round a `w × h` photo can't be drawn with `bytes_per_pixel` a pixel within
+/// `budget` bytes (0: no budget beyond the largest output there is): the canvas and the photo it
+/// is drawn from are both in memory then. `None`: it can.
+pub fn border_too_big(b: &Border, (w, h): (usize, usize), bytes_per_pixel: usize, budget: usize) -> Option<String> {
+    let (cw, ch, _, _) = b.layout(w, h);
+    if let Err(e) = lightcraft_pipeline::check_output_size(cw, ch) {
+        return Some(format!("with its border {e}"));
+    }
+    let bytes = cw.saturating_mul(ch).saturating_add(w.saturating_mul(h)).saturating_mul(bytes_per_pixel);
+    (budget > 0 && bytes > budget).then(|| {
+        format!(
+            "with its border the image would be {cw} × {ch} ({:.0} MP), more than this device can hold; keep the original size or choose a thinner border or another shape",
+            (cw * ch) as f64 / 1e6
+        )
+    })
 }
 
 /// `img` (8-bit, encoded in `space`) on a canvas of the border's colour.
@@ -144,7 +178,7 @@ mod tests {
     #[test]
     fn the_photo_lands_in_the_middle_of_the_colour() {
         let img = Rgba8::from_fn(4, 2, |_, _| [10, 20, 30, 255]);
-        let b = Border { color: [200, 100, 50], thickness: 0.25, ratio: None };
+        let b = Border { color: [200, 100, 50], thickness: 0.25, ratio: None, keep_size: false };
         let out = add_border(&img, &b, OutputSpace::Srgb);
         assert_eq!((out.width, out.height), (6, 4));
         assert_eq!(out.get(0, 0), [200, 100, 50, 255]);
@@ -156,16 +190,48 @@ mod tests {
     #[test]
     fn a_deep_render_gets_the_same_border() {
         let img = DeepImage { width: 2, height: 2, space: OutputSpace::Srgb, samples: DeepSamples::F32(vec![0.5; 12]) };
-        let b = Border { color: [255, 255, 255], thickness: 0.5, ratio: None };
+        let b = Border { color: [255, 255, 255], thickness: 0.5, ratio: None, keep_size: false };
         let out = add_border_deep(&img, &b);
         assert_eq!((out.width, out.height), (4, 4));
         let DeepSamples::F32(v) = out.samples else { panic!("float") };
         assert!((v[0] - 1.0).abs() < 1e-4, "white, linear");
         assert_eq!(v[(4 + 1) * 3], 0.5, "the photo");
         let img = DeepImage { width: 1, height: 1, space: OutputSpace::Srgb, samples: DeepSamples::U16(vec![1, 2, 3]) };
-        let out = add_border_deep(&img, &Border { color: [0, 0, 0], thickness: 0.25, ratio: Some([2, 1]) });
+        let out = add_border_deep(&img, &Border { color: [0, 0, 0], thickness: 0.25, ratio: Some([2, 1]), keep_size: false });
         let DeepSamples::U16(v) = out.samples else { panic!("16-bit") };
         assert_eq!(v.len(), out.width * out.height * 3);
         assert!(v.chunks(3).any(|p| p == [1, 2, 3]));
+    }
+
+    #[test]
+    fn keep_size_shrinks_the_photo_to_make_room() {
+        // the reviewer's case: a 4000 × 6000 portrait, a quarter of the long edge, 4:1
+        let wide = Border { thickness: 0.25, ratio: Some([4, 1]), ..Default::default() };
+        let (cw, ch, _, _) = wide.layout(4000, 6000);
+        assert_eq!((cw, ch), (36000, 9000), "324 MP as it was");
+        let keep = Border { keep_size: true, ..wide };
+        let (pw, ph) = keep.photo_size(4000, 6000);
+        let (cw, ch, _, _) = keep.layout(pw, ph);
+        let ratio = (cw * ch) as f64 / (4000.0 * 6000.0);
+        assert!((0.99..=1.01).contains(&ratio), "the canvas has the photo's own pixels: {cw} × {ch}");
+        assert!((pw as f64 / ph as f64 - 4000.0 / 6000.0).abs() < 0.01, "the photo keeps its shape: {pw} × {ph}");
+        // an even border: the same pixels, the shape a little squarer (as the border is even)
+        let even = Border { keep_size: true, ..Default::default() };
+        let (pw, ph) = even.photo_size(6000, 4000);
+        let (cw, ch, _, _) = even.layout(pw, ph);
+        assert!(((cw * ch) as f64 / 24e6 - 1.0).abs() < 0.01, "{cw} × {ch}");
+        assert_eq!(Border::default().photo_size(6000, 4000), (6000, 4000), "off: the photo at its size");
+    }
+
+    #[test]
+    fn a_border_past_the_budget_is_refused_before_it_is_drawn() {
+        let wide = Border { thickness: 0.25, ratio: Some([4, 1]), ..Default::default() };
+        // 8-bit on a phone with 1 GB for full-resolution work (the canvas alone is 1.3 GB)
+        let why = border_too_big(&wide, (4000, 6000), 4, 1_000_000_000).expect("refused");
+        assert!(why.contains("36000 × 9000") && why.contains("324 MP"), "{why}");
+        assert!(border_too_big(&Border::default(), (4000, 6000), 4, 1_000_000_000).is_none(), "a usual border fits");
+        assert!(border_too_big(&wide, (4000, 6000), 4, 0).is_none(), "no budget: only the largest output counts");
+        let panorama = Border { thickness: 0.25, ratio: Some([1, 4]), ..Default::default() };
+        assert!(border_too_big(&panorama, (60000, 3000), 4, 0).is_some(), "past the largest output there is");
     }
 }

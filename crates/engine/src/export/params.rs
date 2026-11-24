@@ -82,7 +82,7 @@ pub const OPTION_PARAMS: &[&str] = &[
 ];
 
 /// The keys of a `border` object ([`Border`], camelCase).
-pub const BORDER_PARAMS: &[&str] = &["color", "thickness", "ratio"];
+pub const BORDER_PARAMS: &[&str] = &["color", "thickness", "ratio", "keepSize"];
 
 /// Why an export can't add its files to Apple Photos on this platform (`None`: it can, when the
 /// session has the runner; see [`crate::Session::after_export`]).
@@ -351,7 +351,8 @@ impl ExportOptions {
         Ok(())
     }
 
-    /// A `border` value: `{color?: [r, g, b], thickness?: 0..0.25, ratio?: [w, h] | "w:h" | null}`.
+    /// A `border` value: `{color?: [r, g, b], thickness?: 0..0.25, ratio?: [w, h] | "w:h" | null,
+    /// keepSize?: bool}`.
     pub(crate) fn validate_border(cmd: &str, v: &serde_json::Value) -> crate::Result<()> {
         let bad = |msg: String| crate::cmd::bad(cmd, msg);
         let Some(o) = v.as_object() else {
@@ -376,6 +377,11 @@ impl ExportOptions {
                         return Err(bad(format!(
                             "`border.ratio` must be [width, height] or \"width:height\", at most {BORDER_MAX_RATIO}:1 either way"
                         )));
+                    }
+                }
+                "keepSize" => {
+                    if !v.is_boolean() {
+                        return Err(bad("`border.keepSize` must be true or false".into()));
                     }
                 }
                 _ => return Err(bad(unknown_key("border key", k, BORDER_PARAMS))),
@@ -681,5 +687,6 @@ fn border_from_json(v: &serde_json::Value) -> Border {
     let (lo, hi) = BORDER_THICKNESS_RANGE;
     let thickness =
         v.get("thickness").and_then(serde_json::Value::as_f64).filter(|t| t.is_finite()).map_or(d.thickness, |t| (t as f32).clamp(lo, hi));
-    Border { color, thickness, ratio: v.get("ratio").and_then(border_ratio) }
+    let keep_size = v.get("keepSize").and_then(serde_json::Value::as_bool).unwrap_or(d.keep_size);
+    Border { color, thickness, ratio: v.get("ratio").and_then(border_ratio), keep_size }
 }

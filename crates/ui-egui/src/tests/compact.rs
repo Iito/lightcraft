@@ -1427,12 +1427,20 @@ fn phone_add_border_shares_the_photo_framed() {
     assert!(widget(&h, "image:borderPreview").is_some(), "the border page");
     click(&mut h, "button:borderShape2");
     click(&mut h, "button:borderColor4");
+    assert!(widget(&h, "check:borderKeepSize").is_some(), "Keep original size");
+    assert!(widget(&h, "label:borderSize").is_some(), "how big it comes out");
     click(&mut h, "button:shareBorderShare");
     finish_export(&mut h);
     assert_eq!(shared.borrow().len(), 1, "to the share sheet");
     let bytes = written.lock().unwrap().clone();
     let img = lightcraft_codecs::decode(&bytes, Default::default()).expect("a JPEG").to_srgb8();
     assert_eq!(img.width, img.height, "1:1");
+    // kept to the photo's own size: the photo smaller inside its border
+    let id = h.app.session.active().expect("a photo");
+    let photo = h.app.session.catalog.photo(id).expect("photo").clone();
+    let (w, hgt) = lightcraft_engine::export::output_size(&photo, &Default::default());
+    let ratio = (img.width * img.height) as f64 / (w * hgt) as f64;
+    assert!((0.98..=1.02).contains(&ratio), "{}×{} for a {w}×{hgt} photo", img.width, img.height);
     let [r, g, b, _] = img.get(0, 0);
     assert!(r < 16 && g < 16 && b < 16, "black border: {:?}", img.get(0, 0));
     assert!(widget(&h, "panel:shareSheet").is_none(), "the sheet closes");

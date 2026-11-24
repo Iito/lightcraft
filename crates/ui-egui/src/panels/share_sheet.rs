@@ -101,11 +101,13 @@ pub struct BorderForm {
     pub thickness: u8,
     /// An index into [`BORDER_SHAPES`] (0: no border).
     pub shape: usize,
+    /// The photo and its border keep the photo's own size ([`lightcraft_engine::export::Border::keep_size`]).
+    pub keep_size: bool,
 }
 
 impl Default for BorderForm {
     fn default() -> Self {
-        Self { color: [255, 255, 255], thickness: 5, shape: 1 }
+        Self { color: [255, 255, 255], thickness: 5, shape: 1, keep_size: true }
     }
 }
 
@@ -113,7 +115,12 @@ impl BorderForm {
     /// The export's border, or none for Original.
     pub fn border(&self) -> Option<lightcraft_engine::export::Border> {
         let (_, ratio) = BORDER_SHAPES.get(self.shape).copied().filter(|_| self.shape > 0)?;
-        Some(lightcraft_engine::export::Border { color: self.color, thickness: f32::from(self.thickness.min(BORDER_STEPS)) / 100.0, ratio })
+        Some(lightcraft_engine::export::Border {
+            color: self.color,
+            thickness: f32::from(self.thickness.min(BORDER_STEPS)) / 100.0,
+            ratio,
+            keep_size: self.keep_size,
+        })
     }
 
     /// `params` with this border added (unchanged for Original).
@@ -121,7 +128,7 @@ impl BorderForm {
         if let Some(b) = self.border() {
             // (in per cent from the slider's whole steps: 0.05, not f32's 0.0500000007)
             let thickness = f64::from(self.thickness.min(BORDER_STEPS)) / 100.0;
-            params["border"] = json!({"color": b.color, "thickness": thickness, "ratio": b.ratio});
+            params["border"] = json!({"color": b.color, "thickness": thickness, "ratio": b.ratio, "keepSize": b.keep_size});
         }
         params
     }
@@ -510,10 +517,54 @@ fn border_page(app: &mut LightcraftApp, ui: &mut egui::Ui, sheet: &mut Sheet, fo
             });
         },
     );
+    ui.add_space(6.0);
+    let keep = ui.add_enabled_ui(form.shape > 0, |ui| crate::widgets::checkbox(ui, &mut form.keep_size, crate::i18n::tr("Keep original size"))).inner;
+    register(ui, "check:borderKeepSize", keep.rect);
+    let size = border_size(app, ids.first().copied(), form);
+    if let Some(size) = &size {
+        let (text, color) = match &size.too_big {
+            Some(_) => (crate::i18n::tr_format!("{size} · too large for this device", size = size.label), t.caution),
+            None => (size.label.clone(), t.text_dim),
+        };
+        let r = ui.label(egui::RichText::new(text).font(t.font(13.0)).color(color));
+        register(ui, "label:borderSize", r.rect);
+    }
     if share {
+        if let Some(why) = size.and_then(|s| s.too_big) {
+            app.toast(ui.ctx(), why);
+            return;
+        }
         let params = form.apply(Form::default().params(&ids, None));
         run_params(app, ui.ctx(), params, Handoff::Share);
     }
+}
+
+/// How big the first photo comes out with the border: its size in pixels and megapixels (with
+/// the photo's own share of it when the photo shrinks to keep the size), and why it can't be
+/// made when it is more than this device can hold.
+struct BorderSize {
+    label: String,
+    too_big: Option<String>,
+}
+
+fn border_size(app: &LightcraftApp, id: Option<PhotoId>, form: &BorderForm) -> Option<BorderSize> {
+    use lightcraft_engine::export as ex;
+    let b = form.border()?;
+    let photo = app.session.catalog.photo(id?)?;
+    let opts = ex::ExportOptions::from_json(&form.apply(Form::default().params(&[photo.id], None)));
+    let ((w, h), _) = ex::output_size_within(photo, &opts, app.session.media.max_working_pixels);
+    let (cw, ch, _, _) = b.layout(w, h);
+    let mp = (cw * ch) as f64 / 1e6;
+    let mut label = format!("{cw} × {ch} px · {mp:.1} MP");
+    if b.keep_size {
+        let full = ex::output_size(photo, &ex::ExportOptions { border: None, ..opts.clone() });
+        let k = (w as f64 / full.0.max(1) as f64 * 100.0).round();
+        if k < 100.0 {
+            label = crate::i18n::tr_format!("{size} · photo at {k}%", size = label, k = k);
+        }
+    }
+    let too_big = ex::border_too_big(&b, (w, h), ex::border_bytes_per_pixel(&opts), ex::border_budget(&app.session));
+    Some(BorderSize { label, too_big })
 }
 
 /// The photo as Add border will frame it: the border's colour and shape round the thumbnail.
@@ -711,9 +762,9 @@ mod tests {
     #[test]
     fn add_border_adds_the_export_border() {
         let p = BorderForm::default().apply(Form::default().params(&[PhotoId(1)], None));
-        assert_eq!(p["border"], json!({"color": [255, 255, 255], "thickness": 0.05, "ratio": null}));
-        let square = BorderForm { color: [0, 0, 0], thickness: 2, shape: 2 };
-        assert_eq!(square.apply(json!({}))["border"], json!({"color": [0, 0, 0], "thickness": 0.02, "ratio": [1, 1]}));
+        assert_eq!(p["border"], json!({"color": [255, 255, 255], "thickness": 0.05, "ratio": null, "keepSize": true}));
+        let square = BorderForm { color: [0, 0, 0], thickness: 2, shape: 2, keep_size: false };
+        assert_eq!(square.apply(json!({}))["border"], json!({"color": [0, 0, 0], "thickness": 0.02, "ratio": [1, 1], "keepSize": false}));
         let none = BorderForm { shape: 0, ..Default::default() };
         assert!(none.apply(json!({})).get("border").is_none(), "Original: no border");
         // every shape the sheet offers is one the export draws

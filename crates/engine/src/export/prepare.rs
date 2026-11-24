@@ -1,4 +1,5 @@
 use super::batch::run_batch;
+use super::border::border_too_big;
 use super::encoding::{encode_gain_map_jpeg, encode_rendered, export_metadata, removes_location};
 use super::options::ExportFormat;
 use super::params::apple_photos_unsupported;
@@ -52,10 +53,12 @@ pub fn output_size(p: &lightcraft_catalog::Photo, o: &ExportOptions) -> (usize, 
     let (w, h) = lightcraft_pipeline::native_output_size(p.width.max(1) as usize, p.height.max(1) as usize, &p.develop);
     // whole pixels first: a crop's float noise (5999.999… for 6000) must not decide a half-pixel tie
     let (w, h) = (w.round().max(1.0), h.round().max(1.0));
-    match &o.resize {
+    let (w, h) = match &o.resize {
         Some(r) => r.apply(w, h),
         None => (w as usize, h as usize),
-    }
+    };
+    // a border that keeps the size: the photo smaller inside it
+    o.border.as_ref().filter(|_| o.format.is_rendered()).map_or((w, h), |b| b.photo_size(w, h))
 }
 
 /// Render photo `id` at the requested size and encode it (or copy / convert its original for
@@ -168,6 +171,9 @@ fn prepare_guarded(
                 tile_job(j, &mut session.media, p, o);
             }
         }
+        if let Some(why) = o.border.as_ref().and_then(|b| border_too_big(b, (w, h), border_bytes_per_pixel(o), border_budget(session))) {
+            return Err(format!("{label}: {why}"));
+        }
         let weight = render_weight(full_px, long, job.level, w.saturating_mul(h));
         if let Some(why) = too_big_for_memory((w, h), native_px, weight, crate::memory::total_ram()) {
             return Err(format!("{label}: {why}"));
@@ -223,6 +229,26 @@ fn original_folder(source: &lightcraft_catalog::Source) -> Option<String> {
     }
     let dir = std::path::Path::new(path).parent()?.to_string_lossy().to_string();
     (!dir.is_empty()).then_some(dir)
+}
+
+/// Bytes a pixel of the border's canvas takes in memory for export `o` (8-bit RGBA, 16-bit or
+/// float RGB).
+pub fn border_bytes_per_pixel(o: &ExportOptions) -> usize {
+    match o.effective_depth() {
+        OutputDepth::U8 => 4,
+        OutputDepth::U16 => 6,
+        OutputDepth::F32Linear | OutputDepth::F32Hdr => 12,
+    }
+}
+
+/// Memory a border may take: what a full-resolution render may use on a host that caps it (a
+/// phone: [`crate::media::MediaCache::max_working_pixels`] at [`crate::media::WORKING_BYTES_PER_PIXEL`]),
+/// else half the computer's memory (0: not known).
+pub fn border_budget(session: &crate::Session) -> usize {
+    match session.media.max_working_pixels {
+        0 => crate::memory::total_ram().map_or(0, |r| r / 2),
+        px => px.saturating_mul(crate::media::WORKING_BYTES_PER_PIXEL),
+    }
 }
 
 /// Why an export of `out` pixels (`w`, `h`), from a photo of `native_px` pixels at its own size,

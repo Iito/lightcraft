@@ -26,7 +26,7 @@ mod watermark;
 #[cfg(test)]
 use batch::run_batch_with;
 pub use batch::{export_parallelism, run_batch};
-pub use border::{BORDER_MAX_RATIO, BORDER_THICKNESS_RANGE, Border, add_border, add_border_deep};
+pub use border::{BORDER_MAX_RATIO, BORDER_THICKNESS_RANGE, Border, add_border, add_border_deep, border_too_big};
 pub use encoding::{
     encode_deep, encode_gain_map_jpeg, encode_image, encode_rendered, encode_with_metadata, export_metadata, named_space, output_sharpen,
     output_sharpen_deep, removes_location, srgb8_in,
@@ -43,7 +43,8 @@ pub use params::{
 use place::Placer;
 pub use place::{write_file, write_file_durable, write_file_new};
 pub use prepare::{
-    AfterExport, Destination, DngCompression, Exported, PreparedExport, export_batch, export_photo, output_size, prepare_batch, prepare_export,
+    AfterExport, Destination, DngCompression, Exported, PreparedExport, border_budget, border_bytes_per_pixel, export_batch, export_photo,
+    output_size, output_size_within, prepare_batch, prepare_export,
 };
 #[cfg(test)]
 use prepare::{render_weight, too_big_for_memory};

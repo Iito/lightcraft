@@ -26,8 +26,8 @@ use lightcraft_engine::Session;
 
 const MIN: usize = 256 << 20;
 const MAX: usize = 1 << 30;
-/// Peak memory of a full-resolution render per pixel, measured on a 48 MP JPEG (2.87 GB).
-const BYTES_PER_WORKING_PIXEL: usize = 60;
+/// Peak memory of a full-resolution render per pixel.
+const BYTES_PER_WORKING_PIXEL: usize = lightcraft_engine::media::WORKING_BYTES_PER_PIXEL;
 /// Peak memory of a tiled full-size export per pixel besides the tiles' own working set (the
 /// decode, the source and the output), measured on a 60 MP DNG (2.0 GB) and a 48 MP JPEG
 /// (1.17 GB).
