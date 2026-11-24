@@ -1166,6 +1166,7 @@ fn phone_host(ui: serde_json::Value) -> (Headless, Handed, Handed) {
     let mut h = demo(PHONE, ui);
     h.app.services.write_shared = Some(std::sync::Arc::new(|_: &str, _: &[u8]| Ok(())));
     h.app.services.export_dir = Some("/sandbox/Exports".into());
+    h.app.services.handoff_dir = Some("/sandbox/Share".into());
     let (shared, saved) = (Handed::default(), Handed::default());
     let (s, p) = (shared.clone(), saved.clone());
     h.app.services.share = Some(Box::new(move |paths: &[String]| s.borrow_mut().push(paths.to_vec())));
@@ -1191,7 +1192,7 @@ fn phone_share_sends_a_full_size_jpeg_to_the_share_sheet() {
     finish_export(&mut h);
     let shared = shared.borrow();
     assert_eq!(shared.len(), 1, "{shared:?}");
-    assert!(shared[0].len() == 1 && shared[0][0].starts_with("/sandbox/Exports/") && shared[0][0].ends_with(".jpg"), "{shared:?}");
+    assert!(shared[0].len() == 1 && shared[0][0].starts_with("/sandbox/Share/") && shared[0][0].ends_with(".jpg"), "{shared:?}");
     assert!(saved.borrow().is_empty(), "nothing saved to Photos");
     assert!(widget(&h, "panel:shareSheet").is_none(), "the sheet closes");
     assert_eq!(h.app.session.last_export, None, "Export with Previous keeps what it had");
@@ -1212,6 +1213,7 @@ fn phone_save_to_photos_takes_only_the_photos_still_chosen() {
     let saved = saved.borrow();
     assert_eq!(saved.len(), 1, "{saved:?}");
     assert_eq!(saved[0].len(), 2, "the photo taken out stays out: {saved:?}");
+    assert!(saved[0].iter().all(|p| p.starts_with("/sandbox/Share/")), "not among the user's exports: {saved:?}");
     assert!(shared.borrow().is_empty(), "nothing offered to the share sheet");
 }
 

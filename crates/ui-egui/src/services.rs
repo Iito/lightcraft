@@ -141,6 +141,11 @@ pub struct Services {
     /// The default export folder (mobile: inside the app's sandbox); else
     /// `~/Pictures/LightCraft Exports`.
     pub export_dir: Option<String>,
+    /// A folder for the phone Share sheet's one-off files (Share, Add border, Save to Photos),
+    /// kept apart from the user's exports: the files are only on their way to the share sheet or
+    /// the photo library, so each new handoff clears out the old ones ([`crate::panels::share_sheet::HANDOFF_KEEP`]).
+    /// Unset: they go to the export folder.
+    pub handoff_dir: Option<String>,
     /// Offer the files of a finished export from the Export dialog (or Export with Preset /
     /// Previous) in the platform's share sheet (mobile hosts).
     pub share: Option<ShareFn>,

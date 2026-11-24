@@ -255,6 +255,7 @@ fn services(originals: Originals, backend: Option<Backend>, files: Files, frozen
         pick_folder: None,
         // exports are downloads; the folder only names them
         export_dir: None,
+        handoff_dir: None,
         share: None,
         save_to_photos: None,
         mobile: false,

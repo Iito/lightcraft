@@ -475,12 +475,15 @@ impl eframe::App for App {
 
 /// `export_dir`: where exports go by default (next to the library, inside the sandbox; on iOS
 /// `Documents/`, so they show in the Files app too).
-fn services(export_dir: String, ctx: &egui::Context) -> Services {
+/// `handoff_dir`: the Share sheet's one-off files, out of the user's sight (on Android inside
+/// `filesDir`, the only place `FilesProvider` hands out).
+fn services(export_dir: String, handoff_dir: String, ctx: &egui::Context) -> Services {
     #[cfg(not(target_os = "ios"))]
     let _ = ctx;
     let saves = std::path::PathBuf::from(&export_dir);
     Services {
         export_dir: Some(export_dir),
+        handoff_dir: Some(handoff_dir),
         // a finished export opens the share sheet (AirDrop, Messages, Save to Photos, other apps)
         #[cfg(target_os = "ios")]
         share: Some(Box::new(ios_share::share)),
@@ -765,7 +768,10 @@ pub fn run(mut options: eframe::NativeOptions, library_dir: std::path::PathBuf, 
             let fresh = || Session::new().with_fs().with_system_clock().with_models_in(&data_dir);
             let (mut s, problem) = lightcraft_ui_egui::panels::library_problem::open_or_problem(fresh, &library_dir, true);
             memory::configure(&mut s, &_cc.egui_ctx);
-            let mut app = LightcraftApp::new(s, services(export_dir, &_cc.egui_ctx));
+            // what the last run handed off has long been taken
+            let handoff_dir = data_dir.join("Share");
+            lightcraft_ui_egui::panels::share_sheet::clear_handoff(&handoff_dir, std::time::Duration::ZERO);
+            let mut app = LightcraftApp::new(s, services(export_dir, handoff_dir.to_string_lossy().to_string(), &_cc.egui_ctx));
             app.library_problem = problem;
             // the settings saved last time (language, shortcuts, panels …)
             let (prefs, saved, warning) = lightcraft_ui_egui::prefs::UiPrefs::load(data_dir.join("ui.json"));

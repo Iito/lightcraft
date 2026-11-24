@@ -644,9 +644,31 @@ fn run(app: &mut LightcraftApp, ctx: &egui::Context, form: &Form, ids: &[PhotoId
     run_params(app, ctx, params, to);
 }
 
+/// How long a handed-off file stays in [`crate::Services::handoff_dir`]: the share sheet, an app it
+/// went to, or the photo library may still be reading it for a while after the sheet closes.
+pub const HANDOFF_KEEP: std::time::Duration = std::time::Duration::from_secs(10 * 60);
+
+/// Delete the files in `dir` last changed more than `keep` ago (all of them with zero, as the app
+/// starts). Best effort: a file that can't be removed now goes on the next handoff.
+pub fn clear_handoff(dir: &std::path::Path, keep: std::time::Duration) {
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    let now = std::time::SystemTime::now();
+    for e in entries.flatten() {
+        let old = e.metadata().and_then(|m| m.modified()).ok().and_then(|t| now.duration_since(t).ok()).is_none_or(|age| age >= keep);
+        if old && e.file_type().is_ok_and(|t| t.is_file()) {
+            let _ = std::fs::remove_file(e.path());
+        }
+    }
+}
+
 /// Run `app.export` with `params` in the background, handing its files `to` the share sheet or the
-/// photo library; Export with Previous keeps what it had.
-fn run_params(app: &mut LightcraftApp, ctx: &egui::Context, params: Value, to: Handoff) {
+/// photo library; Export with Previous keeps what it had. With a handoff folder the files go
+/// there, not among the user's exports, and the ones handed off a while ago are deleted.
+fn run_params(app: &mut LightcraftApp, ctx: &egui::Context, mut params: Value, to: Handoff) {
+    if let Some(dir) = app.services.handoff_dir.clone() {
+        clear_handoff(std::path::Path::new(&dir), HANDOFF_KEEP);
+        params["dir"] = json!(dir);
+    }
     let previous = app.session.last_export.clone();
     app.export_handoff = Some(to);
     let r = app.run("app.export", params);
@@ -662,6 +684,20 @@ fn run_params(app: &mut LightcraftApp, ctx: &egui::Context, params: Value, to: H
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn clear_handoff_keeps_recent_files_and_folders() {
+        let dir = std::env::temp_dir().join(format!("lc-handoff-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("sub")).expect("temp dir");
+        std::fs::write(dir.join("IMG_0001.jpg"), b"x").expect("write");
+        clear_handoff(&dir, HANDOFF_KEEP);
+        assert!(dir.join("IMG_0001.jpg").exists(), "a file just handed off stays");
+        clear_handoff(&dir, std::time::Duration::ZERO);
+        assert!(!dir.join("IMG_0001.jpg").exists(), "at start-up every file goes");
+        assert!(dir.join("sub").exists(), "only files are deleted");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn share_is_a_full_size_srgb_jpeg() {
