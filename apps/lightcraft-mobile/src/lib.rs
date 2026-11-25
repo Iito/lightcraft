@@ -416,6 +416,10 @@ impl eframe::App for App {
             ios_orientation::start(ctx);
             self.app.device_turn = ios_orientation::turn();
         }
+        #[cfg(target_os = "android")]
+        {
+            self.app.device_turn = android_jni::turn();
+        }
         memory::poll(&mut self.app.session);
         self.app.logic(ctx);
         // the settings, a few seconds after a change (a phone may stop the app without asking)

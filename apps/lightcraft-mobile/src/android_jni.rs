@@ -288,7 +288,25 @@ extern "system" fn native_wake<'local>(_env: jni::EnvUnowned<'local>, _this: JOb
     }
 }
 
-/// Have the activity wake `ctx` when the soft keyboard types. NativeActivity loads the library
+/// Which way a phone is held (phones stay upright, so the system doesn't turn the interface): 1
+/// (top to the left), -1 (top to the right) or 0, as on iOS. The activity's orientation listener
+/// reports changes; tablets, which turn freely, never do.
+static TURN: std::sync::atomic::AtomicI8 = std::sync::atomic::AtomicI8::new(0);
+
+/// `LightCraftActivity.nativeTurn(int)`: the phone was turned (main thread).
+extern "system" fn native_turn<'local>(_env: jni::EnvUnowned<'local>, _this: JObject<'local>, turn: jni::sys::jint) {
+    TURN.store(turn.clamp(-1, 1) as i8, std::sync::atomic::Ordering::Relaxed);
+    if let Some(ctx) = WAKE.get() {
+        ctx.request_repaint();
+    }
+}
+
+/// Which way the phone is held: 1 (top to the left), -1 (top to the right) or 0 (upright).
+pub fn turn() -> i8 {
+    TURN.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Have the activity wake `ctx` when the soft keyboard types, and report the phone's turn. NativeActivity loads the library
 /// itself, not through `System.loadLibrary`, so the JVM can't find `Java_…` symbols in it: the
 /// native method is registered by hand.
 pub fn register_wake(app: &AndroidApp, ctx: &egui::Context) {
@@ -297,9 +315,11 @@ pub fn register_wake(app: &AndroidApp, ctx: &egui::Context) {
         let class = env.get_object_class(activity)?;
         // SAFETY: `native_wake` is an instance method taking no arguments and returning nothing,
         // matching `()V`
+        // and `native_turn` an instance method taking an int, matching `(I)V`
         unsafe {
-            let m = jni::NativeMethod::from_raw_parts(jni_str!("nativeWake"), jni_str!("()V"), native_wake as *mut std::ffi::c_void);
-            env.register_native_methods(&class, &[m])
+            let wake = jni::NativeMethod::from_raw_parts(jni_str!("nativeWake"), jni_str!("()V"), native_wake as *mut std::ffi::c_void);
+            let turn = jni::NativeMethod::from_raw_parts(jni_str!("nativeTurn"), jni_str!("(I)V"), native_turn as *mut std::ffi::c_void);
+            env.register_native_methods(&class, &[wake, turn])
         }
     });
     if let Err(e) = r {

@@ -14,6 +14,7 @@ import android.os.Bundle;
 import android.provider.DocumentsContract;
 import android.provider.MediaStore;
 import android.provider.OpenableColumns;
+import android.provider.Settings;
 import android.webkit.MimeTypeMap;
 import android.graphics.Color;
 import android.text.SpannableString;
@@ -21,6 +22,7 @@ import android.text.style.ForegroundColorSpan;
 import android.view.ContextThemeWrapper;
 import android.view.Gravity;
 import android.view.HapticFeedbackConstants;
+import android.view.OrientationEventListener;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.view.SubMenu;
@@ -64,9 +66,75 @@ public class LightCraftActivity extends NativeActivity {
     protected void onCreate(Bundle state) {
         if (getResources().getConfiguration().smallestScreenWidthDp < 600) {
             setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
+            turnListener = new OrientationEventListener(this) {
+                @Override
+                public void onOrientationChanged(int degrees) {
+                    turnTo(turnOf(degrees));
+                }
+            };
         }
         super.onCreate(state);
     }
+
+    /**
+     * Phones only: which way the phone is held, so the editor can show the photo alone, turned,
+     * while the interface stays upright (the shell's {@code LightcraftApp::device_turn}). Upright
+     * while the system's auto-rotate is off, as other apps then stay put too.
+     */
+    private OrientationEventListener turnListener;
+    private int turn;
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (turnListener != null && turnListener.canDetectOrientation()) {
+            turnListener.enable();
+        }
+    }
+
+    @Override
+    protected void onPause() {
+        if (turnListener != null) {
+            turnListener.disable();
+        }
+        super.onPause();
+    }
+
+    /**
+     * 1: top to the left, -1: top to the right, 0: upright; null (flat, or between two) keeps the
+     * last. The sensor's degrees grow clockwise: 90 has the left side up (top to the right).
+     * Wide dead zones keep it from flickering at 45 degrees.
+     */
+    private Integer turnOf(int degrees) {
+        if (degrees == OrientationEventListener.ORIENTATION_UNKNOWN) {
+            return null;
+        }
+        if (degrees >= 240 && degrees <= 300) {
+            return 1;
+        }
+        if (degrees >= 60 && degrees <= 120) {
+            return -1;
+        }
+        if (degrees <= 30 || degrees >= 330 || (degrees >= 150 && degrees <= 210)) {
+            return 0;
+        }
+        return null;
+    }
+
+    private void turnTo(Integer t) {
+        if (t == null) {
+            return;
+        }
+        boolean autoRotate = Settings.System.getInt(getContentResolver(), Settings.System.ACCELEROMETER_ROTATION, 1) == 1;
+        int next = autoRotate ? t : 0;
+        if (next != turn) {
+            turn = next;
+            nativeTurn(next);
+        }
+    }
+
+    /** Tells the shell which way the phone is held (registered over JNI; see {@code android_jni}). */
+    private native void nativeTurn(int turn);
 
     private static final int PICK = 0x4c43;
     private static final int DOCS = 0x4c44;
